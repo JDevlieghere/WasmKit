@@ -138,6 +138,51 @@
             }
         }
 
+        @Test
+        func detachRunsTheGuestToCompletion() async throws {
+            let (requested, _) = try divergentAddresses()
+            try await withHandler { h in
+                try await insert(h, at: requested)
+                #expect(pairs(try h.handle(command: .init(kind: .continue, arguments: "")))["reason"] == "breakpoint")
+
+                try h.detach()
+
+                let status = try h.handle(command: .init(kind: .targetStatus, arguments: ""))
+                guard case .string(let reply) = status.kind else {
+                    Issue.record("expected an exit reply after detaching, got \(status.kind)")
+                    return
+                }
+                #expect(reply.hasPrefix("W"))
+            }
+        }
+
+        @Test
+        func detachOnDisconnectIsRequestedByDefaultAndSelectable() async throws {
+            try await withHandler { h in
+                #expect(h.detachesOnDisconnect)
+
+                let off = try h.handle(command: .init(kind: .setDetachOnError, arguments: "0"))
+                if case .ok = off.kind {
+                } else {
+                    Issue.record("expected OK, got \(off.kind)")
+                }
+                #expect(!h.detachesOnDisconnect)
+
+                _ = try h.handle(command: .init(kind: .setDetachOnError, arguments: "1"))
+                #expect(h.detachesOnDisconnect)
+            }
+        }
+
+        @Test
+        func setDetachOnErrorRejectsValuesOtherThanZeroOrOne() async throws {
+            _ = try await withHandler { h in
+                #expect(throws: WasmKitGDBHandler.Error.self) {
+                    _ = try h.handle(command: .init(kind: .setDetachOnError, arguments: "2"))
+                }
+                #expect(h.detachesOnDisconnect)
+            }
+        }
+
         static let globalWAT = """
             (module
               (global $g (mut i32) (i32.const 7))

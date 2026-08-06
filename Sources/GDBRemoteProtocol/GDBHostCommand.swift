@@ -27,6 +27,7 @@ package struct GDBHostCommand: Equatable {
         case vContSupportedActions
         case isVAttachOrWaitSupported
         case enableErrorStrings
+        case setDetachOnError
         case processInfo
         case currentThreadID
         case firstThreadInfo
@@ -76,6 +77,8 @@ package struct GDBHostCommand: Equatable {
                 self = .isVAttachOrWaitSupported
             case "QEnableErrorStrings":
                 self = .enableErrorStrings
+            case "QSetDetachOnError":
+                self = .setDetachOnError
             case "qProcessInfo":
                 self = .processInfo
             case "qC":

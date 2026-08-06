@@ -35,29 +35,30 @@
             defer { listener.close() }
             logger.trace("Debugger server listening on port \(port)")
 
-            // A GDB stub serves one client at a time: accept connections
-            // sequentially until the client asks the target to shut down.
-            serving: while true {
-                let connection = try listener.accept()
-                defer { connection.close() }
+            // A GDB stub serves one client. The guest advances only through that client's
+            // packets and cannot be restarted, so a second one has nothing to attach to.
+            let connection = try listener.accept()
+            defer { connection.close() }
 
-                var decoder = GDBHostCommandDecoder(logger: logger)
-                let encoder = GDBTargetResponseEncoder(logger: logger)
+            var decoder = GDBHostCommandDecoder(logger: logger)
+            let encoder = GDBTargetResponseEncoder(logger: logger)
 
-                do {
-                    while let bytes = try connection.receive() {
-                        decoder.feed(bytes)
-                        while let packet = try decoder.next() {
-                            let response = try debuggerHandler.handle(command: packet.payload)
-                            try connection.send(encoder.encode(data: response))
-                        }
+            do {
+                while let bytes = try connection.receive() {
+                    decoder.feed(bytes)
+                    while let packet = try decoder.next() {
+                        let response = try debuggerHandler.handle(command: packet.payload)
+                        try connection.send(encoder.encode(data: response))
                     }
-                } catch WasmKitGDBHandler.Error.killRequestReceived {
-                    logger.trace("Debugger shut down request received")
-                    break serving
-                } catch {
-                    logger.error("Error in GDB remote protocol connection: \(error)")
                 }
+                logger.trace("Debugger disconnected")
+                if debuggerHandler.detachesOnDisconnect {
+                    try debuggerHandler.detach()
+                }
+            } catch WasmKitGDBHandler.Error.killRequestReceived {
+                logger.trace("Debugger shut down request received")
+            } catch {
+                logger.error("Error in GDB remote protocol connection: \(error)")
             }
             try debuggerHandler.close()
         }
