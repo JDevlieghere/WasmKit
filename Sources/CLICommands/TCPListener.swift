@@ -1,5 +1,5 @@
 // A minimal blocking TCP listener for the debugger server. A GDB stub serves
-// one client at a time, so a simple accept/read/write loop is all we need.
+// one client, so a simple accept/read/write loop is all we need.
 #if WasmDebuggingSupport && !os(Windows)
 
     #if canImport(Darwin)

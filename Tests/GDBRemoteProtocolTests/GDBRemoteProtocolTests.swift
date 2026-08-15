@@ -75,6 +75,15 @@ struct GDBRemoteProtocolTests {
     }
 
     @Test
+    func decodingSetDetachOnError() throws {
+        var decoder = self.decoder
+        decoder.feed(Array("+$QSetDetachOnError:1#f8".utf8))
+        let packet = try decoder.next()
+        #expect(packet?.payload.kind == .setDetachOnError)
+        #expect(packet?.payload.arguments == "1")
+    }
+
+    @Test
     func decodingSplitAcrossFeeds() throws {
         var decoder = self.decoder
         decoder.feed(Array("+$g".utf8))

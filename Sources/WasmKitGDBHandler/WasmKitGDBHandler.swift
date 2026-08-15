@@ -48,6 +48,7 @@
             case unknownHexEncodedArguments(String)
             case unknownWasmLocalArguments(String)
             case unknownWasmGlobalArguments(String)
+            case unknownDetachOnErrorArgument(String)
         }
 
         private let moduleFilePath: String
@@ -61,6 +62,10 @@
         /// the requested address, which is the location the host knows.
         private var userBreakpoints: [Int: Int] = [:]
         private let wasi: WASIBridgeToHost
+
+        /// Whether a client that goes away without `k` or `D` leaves the guest running to
+        /// completion, as `QSetDetachOnError` selects.
+        package private(set) var detachesOnDisconnect = true
 
         /// Creates a handler debugging the given WebAssembly binary.
         ///
@@ -126,6 +131,18 @@
 
         package func close() throws {
             try wasi.close()
+        }
+
+        /// Lets the guest run to completion, as `D` asks for. The resume is blocking, so a guest
+        /// that never terminates keeps the caller here.
+        package func detach() throws {
+            self.debugger.removeAllBreakpoints()
+            self.userBreakpoints.removeAll()
+
+            // Resuming a guest that already returned would be a restart, which is unimplemented.
+            guard case .stoppedAtBreakpoint = self.debugger.state else { return }
+
+            try self.debugger.run()
         }
 
         enum Endianness {
@@ -235,6 +252,18 @@
                 .symbolLookup, .jsonThreadsInfo, .jsonThreadExtendedInfo:
                 responseKind = .empty
 
+            case .setDetachOnError:
+                switch command.arguments {
+                case "0":
+                    self.detachesOnDisconnect = false
+                case "1":
+                    self.detachesOnDisconnect = true
+                default:
+                    throw Error.unknownDetachOnErrorArgument(command.arguments)
+                }
+
+                responseKind = .ok
+
             case .processInfo:
                 responseKind = .keyValuePairs([
                     ("pid", "1"),
@@ -341,10 +370,7 @@
                 throw Error.killRequestReceived
 
             case .detach:
-                self.debugger.removeAllBreakpoints()
-                self.userBreakpoints.removeAll()
-
-                try self.debugger.run()
+                try self.detach()
                 throw Error.killRequestReceived
 
             case .insertSoftwareBreakpoint:
