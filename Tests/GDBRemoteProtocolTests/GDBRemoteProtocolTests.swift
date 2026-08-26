@@ -68,6 +68,17 @@ struct GDBRemoteProtocolTests {
     }
 
     @Test
+    func decodingWasmGlobalNamingAnInstance() throws {
+        var decoder = self.decoder
+        // Only the first colon separates a command kind from its arguments, so a
+        // key-value argument keeps its own.
+        decoder.feed(Array("+$qWasmGlobal:1;instance:0;#fa".utf8))
+        let packet = try decoder.next()
+        #expect(packet?.payload.kind == .wasmGlobal)
+        #expect(packet?.payload.arguments == "1;instance:0;")
+    }
+
+    @Test
     func wasmGlobalMemberwiseInit() {
         let command = GDBHostCommand(kind: .wasmGlobal, arguments: "0;1")
         #expect(command.kind == .wasmGlobal)

@@ -29,6 +29,48 @@
         }
     }
 
+    /// The module instance and global index a `qWasmGlobal` request names.
+    ///
+    /// A debugger advertising `qWasmGlobalInstance+` specifies the instance owning
+    /// the global index with an `instance:<id>` field. Older debuggers may send
+    /// a frame index instead.
+    struct WasmGlobalRequest {
+        private static let instanceKey = "instance:"
+
+        /// The instance owning the global index space, or nil where the request named a
+        /// frame and the instance is whichever one that frame is executing.
+        let instance: UInt64?
+
+        let globalIndex: UInt
+
+        /// Parses `<global>;instance:<id>` or the older `<frame>;<global>`.
+        init?(arguments: String) {
+            // Keep empty fields so a malformed `<frame>;` is rejected rather than read as `<frame>`.
+            var fields = arguments.split(separator: ";", omittingEmptySubsequences: false)
+
+            // A request may terminate its last field with the delimiter, yielding a
+            // trailing empty field that carries no argument.
+            if fields.count == 3 && fields[2].isEmpty {
+                fields.removeLast()
+            }
+
+            // Exactly two fields, so a request mixing both forms is rejected rather than
+            // read as one of them.
+            guard fields.count == 2, let first = UInt(fields[0]) else { return nil }
+
+            if fields[1].hasPrefix(Self.instanceKey) {
+                guard let instance = UInt64(fields[1].dropFirst(Self.instanceKey.count)) else { return nil }
+                self.instance = instance
+                self.globalIndex = first
+                return
+            }
+
+            guard let globalIndex = UInt(fields[1]) else { return nil }
+            self.instance = nil
+            self.globalIndex = globalIndex
+        }
+    }
+
     /// A sans-IO GDB remote-protocol target.
     package final class WasmKitGDBHandler {
         enum ResumeThreadsAction: String {
@@ -54,6 +96,10 @@
         private let moduleFilePath: String
         private let logger: GDBLogger
         private var debugger: Debugger
+
+        /// Generic error reply. `QEnableErrorStrings` is unsupported, so a bare code is
+        /// the only way to refuse a request the target understands but cannot answer.
+        private static let errorReply = "E45"
 
         private var memoryView: DebuggerMemoryView
         /// User-set breakpoints, keyed by the address the debugger host
@@ -243,7 +289,7 @@
                 ])
 
             case .supportedFeatures:
-                responseKind = .string("qXfer:libraries:read+;PacketSize=1000;")
+                responseKind = .string("qXfer:libraries:read+;qWasmGlobalInstance+;PacketSize=1000;")
 
             case .vContSupportedActions:
                 responseKind = .vContSupportedActions([.continue, .step])
@@ -299,7 +345,7 @@
                         ("generic", "pc"),
                     ])
                 } else {
-                    responseKind = .string("E45")
+                    responseKind = .string(Self.errorReply)
                 }
 
             case .transfer:
@@ -410,17 +456,20 @@
                 )
 
             case .wasmGlobal:
-                // Keep empty fields so a malformed `<frame>;` is rejected rather than read as `<frame>`.
-                let arguments = command.arguments.split(separator: ";", omittingEmptySubsequences: false)
-                guard arguments.count == 2,
-                    let globalIndex = UInt(arguments[1])
-                else {
+                guard let request = WasmGlobalRequest(arguments: command.arguments) else {
                     throw Error.unknownWasmGlobalArguments(command.arguments)
                 }
 
-                responseKind = .hexEncodedBinary(
-                    try self.debugger.getGlobal(index: globalIndex).littleEndianBytes
-                )
+                // A global index is meaningful only within one instance's global index
+                // space, so a request naming another instance is refused rather than
+                // answered from this one.
+                if let instance = request.instance, instance != DebuggerMemoryView.moduleInstanceID {
+                    responseKind = .string(Self.errorReply)
+                } else {
+                    responseKind = .hexEncodedBinary(
+                        try self.debugger.getGlobal(index: request.globalIndex).littleEndianBytes
+                    )
+                }
 
             case .memoryRegionInfo:
                 responseKind = .empty
