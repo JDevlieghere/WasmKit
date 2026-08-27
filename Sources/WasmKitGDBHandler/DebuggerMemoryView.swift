@@ -15,7 +15,15 @@
     import WasmKit
 
     package struct DebuggerMemoryView: ~Copyable {
-        package static let executableCodeOffset = UInt64(0x4000_0000_0000_0000)
+        /// Addresses tag their space in bits 63:62: 0 is linear memory, 1 the object
+        /// space holding the module image.
+        private static let objectSpaceTag = UInt64(1) << 62
+
+        /// The id of the only module instance the debugger runs, carried in bits 61:32
+        /// of the addresses reported for it.
+        package static let moduleInstanceID = UInt64(0)
+
+        package static let executableCodeOffset = objectSpaceTag | (moduleInstanceID << 32)
 
         /// WebAssembly binary loaded into memory for execution
         /// and for disassembly by the debugger.

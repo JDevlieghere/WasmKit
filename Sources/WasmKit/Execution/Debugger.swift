@@ -390,8 +390,10 @@
             throw Error.stackFrameIndexOOB(frameIndex)
         }
 
-        /// Globals are module-wide, so the GDB `qWasmGlobal:<frame>;<index>` frame argument is
-        /// irrelevant (matches LLDB eWasmTagGlobal).
+        /// The global at `index` in the debugged instance's global index space.
+        ///
+        /// Globals are instance-wide, so a `qWasmGlobal` frame argument carries no
+        /// information and is dropped, matching LLDB's `eWasmTagGlobal`.
         package func getGlobal(index: UInt) throws -> UInt64 {
             let globals = self.instance.handle.globals
             guard index < UInt(globals.count) else { throw Error.globalIndexOOB(index) }

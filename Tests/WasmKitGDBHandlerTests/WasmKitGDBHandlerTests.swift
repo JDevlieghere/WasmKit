@@ -183,9 +183,12 @@
             }
         }
 
+        // Distinct global values, so a reply pins down which field of a `qWasmGlobal`
+        // request was read as the global index.
         static let globalWAT = """
             (module
               (global $g (mut i32) (i32.const 7))
+              (global $h (mut i32) (i32.const 11))
               (func (export "_start") (result i32) (global.get $g)))
             """
 
@@ -220,12 +223,109 @@
         }
 
         @Test
+        func wasmGlobalIgnoresTheFrameIndex() async throws {
+            try await withGlobalHandler { h in
+                let resp = try h.handle(command: .init(kind: .wasmGlobal, arguments: "0;1"))
+                guard case .hexEncodedBinary(let bytes) = resp.kind else {
+                    Issue.record("expected hexEncodedBinary, got \(resp.kind)")
+                    return
+                }
+                #expect(UInt64(littleEndianBytes: bytes) == 11)
+            }
+        }
+
+        @Test
         func wasmGlobalRejectsMissingIndex() async throws {
             _ = try await withGlobalHandler { h in
                 #expect(throws: WasmKitGDBHandler.Error.self) {
                     _ = try h.handle(command: .init(kind: .wasmGlobal, arguments: "0;"))
                 }
             }
+        }
+
+        @Test
+        func supportedFeaturesAdvertisesInstanceNamedWasmGlobal() async throws {
+            try await withGlobalHandler { h in
+                let resp = try h.handle(command: .init(kind: .supportedFeatures, arguments: ""))
+                guard case .string(let features) = resp.kind else {
+                    Issue.record("expected a feature string, got \(resp.kind)")
+                    return
+                }
+                #expect(features.split(separator: ";").contains("qWasmGlobalInstance+"))
+            }
+        }
+
+        @Test
+        func wasmGlobalReadsTheGlobalOfAnInstanceNamedRequest() async throws {
+            try await withGlobalHandler { h in
+                let resp = try h.handle(
+                    command: .init(
+                        kind: .wasmGlobal,
+                        arguments: "1;instance:\(DebuggerMemoryView.moduleInstanceID);"))
+                guard case .hexEncodedBinary(let bytes) = resp.kind else {
+                    Issue.record("expected hexEncodedBinary, got \(resp.kind)")
+                    return
+                }
+                #expect(UInt64(littleEndianBytes: bytes) == 11)
+            }
+        }
+
+        @Test
+        func wasmGlobalAcceptsAnInstanceWithoutATrailingDelimiter() async throws {
+            try await withGlobalHandler { h in
+                let resp = try h.handle(
+                    command: .init(
+                        kind: .wasmGlobal,
+                        arguments: "1;instance:\(DebuggerMemoryView.moduleInstanceID)"))
+                guard case .hexEncodedBinary(let bytes) = resp.kind else {
+                    Issue.record("expected hexEncodedBinary, got \(resp.kind)")
+                    return
+                }
+                #expect(UInt64(littleEndianBytes: bytes) == 11)
+            }
+        }
+
+        @Test
+        func wasmGlobalRefusesAnInstanceItDoesNotRun() async throws {
+            try await withGlobalHandler { h in
+                let unknown = DebuggerMemoryView.moduleInstanceID + 1
+                let resp = try h.handle(
+                    command: .init(kind: .wasmGlobal, arguments: "0;instance:\(unknown);"))
+                guard case .string(let reply) = resp.kind else {
+                    Issue.record("expected an error reply, got \(resp.kind)")
+                    return
+                }
+                #expect(reply.hasPrefix("E"))
+            }
+        }
+
+        @Test
+        func wasmGlobalRejectsAnUnparsableInstance() async throws {
+            _ = try await withGlobalHandler { h in
+                #expect(throws: WasmKitGDBHandler.Error.self) {
+                    _ = try h.handle(command: .init(kind: .wasmGlobal, arguments: "0;instance:;"))
+                }
+            }
+        }
+
+        // Both forms at once names the global ambiguously, so neither reading may be served.
+        @Test
+        func wasmGlobalRejectsARequestMixingAFrameIndexAndAnInstance() async throws {
+            _ = try await withGlobalHandler { h in
+                #expect(throws: WasmKitGDBHandler.Error.self) {
+                    _ = try h.handle(
+                        command: .init(
+                            kind: .wasmGlobal,
+                            arguments: "0;1;instance:\(DebuggerMemoryView.moduleInstanceID);"))
+                }
+            }
+        }
+
+        // Addresses reported to a host are offsets from this base, making its value part
+        // of the protocol rather than an implementation detail.
+        @Test
+        func executableCodeStartsAtTheObjectSpaceTag() {
+            #expect(DebuggerMemoryView.executableCodeOffset == 0x4000_0000_0000_0000)
         }
     }
 
